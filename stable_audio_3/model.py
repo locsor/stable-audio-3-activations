@@ -79,6 +79,7 @@ class StableAudioModel:
         # Simple path: pass a prompt string and duration
         prompt: str | list = None,
         negative_prompt: str | list = None,
+        act_idx: list = [],
         duration: float | list = 120,
         # Generation parameters
         steps: int = 8,
@@ -105,6 +106,8 @@ class StableAudioModel:
         dist_shift=None,
         return_latents: bool = False,
         chunked_decode: tp.Optional[bool] = None,
+        otf_act=None,
+        otf_act_param=[],
         **sampler_kwargs,
     ) -> torch.Tensor:
         """
@@ -344,6 +347,8 @@ class StableAudioModel:
             init_noise_level=init_noise_level,
             decode=not return_latents,
             chunked_decode=chunked_decode,
+            otf_act=otf_act,
+            otf_act_param=otf_act_param,
             **sampler_kwargs,
         )
 

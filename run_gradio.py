@@ -20,6 +20,13 @@ def main(args):
     set_verbose(getattr(args, "verbose", False))
     torch.manual_seed(42)
     model_half = args.model_half
+
+    if args.act != None:
+        act_idx = args.act.split(',')
+        act_idx = list(map(int, act_idx))
+    else:
+        act_idx = []
+
     model = StableAudioModel.from_pretrained(args.model, model_half=model_half)
     if args.lora_ckpt_path:
         model.load_lora(args.lora_ckpt_path)
@@ -27,6 +34,8 @@ def main(args):
         model,
         gradio_title=args.title if args.title is not None else "Stable Audio 3",
         default_prompt=args.default_prompt,
+        model_type=args.model,
+        lora_ckpt_path=args.lora_ckpt_path
     )
     interface.queue()
     interface.launch(
@@ -42,6 +51,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run gradio interface")
     parser.add_argument(
         "--model", type=str, help="Name of pretrained model", required=True
+    )
+    parser.add_argument(
+        "--act", type=str, required=False
     )
     parser.add_argument(
         "--model-config", type=str, help="Path to model config", required=False

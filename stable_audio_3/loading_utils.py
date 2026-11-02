@@ -8,7 +8,6 @@ from stable_audio_3.factory import (
     create_diffusion_cond_from_config,
 )
 
-
 def copy_state_dict(model, state_dict):
     model_state_dict = model.state_dict()
     state_dict = remap_state_dict_keys(state_dict, model_state_dict)
@@ -62,7 +61,7 @@ def load_diffusion_cond(
     model_config,
     ckpt_path: str,
     device: str = "cuda",
-    model_half: bool = False,
+    model_half: bool = False
 ):
     model = create_diffusion_cond_from_config(model_config)
     copy_state_dict(model, load_file(ckpt_path))

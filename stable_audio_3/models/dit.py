@@ -32,6 +32,7 @@ class DiffusionTransformer(nn.Module):
         timestep_features_dim = 256,
         timestep_features_logsnr: bool = False,
         modular_local_cond_configs = None,
+        act_idx=[],
         **kwargs):
 
         super().__init__()
@@ -124,6 +125,7 @@ class DiffusionTransformer(nn.Module):
                 cond_token_dim = cond_embed_dim,
                 global_cond_dim=global_dim,
                 modular_local_cond_configs=modular_local_cond_configs,
+                act_idx=act_idx,
                 **kwargs
             )
       
@@ -155,13 +157,13 @@ class DiffusionTransformer(nn.Module):
                          mask=None, prepend_mask=None, return_info=False,
                          exit_layer_ix=None, local_add_cond=None,
                          modular_local_cond=None, padding_mask=None,
-                         extra_args=None, **kwargs):
+                         extra_args=None, otf_act=None, otf_act_param=[], **kwargs):
         """Helper method to call transformer and handle early exit logic."""
 
         output = self.transformer(x, prepend_embeds=prepend_inputs, context=cross_attn_cond,
                                     return_info=return_info, exit_layer_ix=exit_layer_ix,
                                     local_add_cond=local_add_cond, modular_local_cond=modular_local_cond,
-                                    padding_mask=padding_mask,
+                                    padding_mask=padding_mask, otf_act=otf_act, otf_act_param=otf_act_param,
                                     **(extra_args or {}), **kwargs)
 
         if return_info:
@@ -192,6 +194,8 @@ class DiffusionTransformer(nn.Module):
         padding_mask=None,
         return_info=False,
         exit_layer_ix=None,
+        otf_act=None,
+        otf_act_param=[],
         **kwargs):
 
         if cross_attn_cond is not None:
@@ -285,6 +289,8 @@ class DiffusionTransformer(nn.Module):
             modular_local_cond=modular_local_cond,
             padding_mask=padding_mask,
             extra_args=extra_args,
+            otf_act=otf_act,
+            otf_act_param=otf_act_param,
             **kwargs,
         )
 
@@ -371,6 +377,8 @@ class DiffusionTransformer(nn.Module):
         mask=None,
         return_info=False,
         exit_layer_ix=None,
+        otf_act=None,
+        otf_act_param=[],
         **kwargs):
 
         assert not causal, "Causal mode is not supported for DiffusionTransformer"
@@ -434,6 +442,8 @@ class DiffusionTransformer(nn.Module):
                 mask=mask,
                 return_info=return_info,
                 exit_layer_ix=exit_layer_ix,
+                otf_act=otf_act,
+                otf_act_param=otf_act_param,
                 **kwargs
             )
 
@@ -565,6 +575,8 @@ class DiffusionTransformer(nn.Module):
                 prepend_cond_mask = batch_prepend_cond_mask,
                 padding_mask = batch_padding_mask,
                 return_info = return_info,
+                otf_act=otf_act,
+                otf_act_param=[],
                 **kwargs)
 
             if return_info:
@@ -639,5 +651,7 @@ class DiffusionTransformer(nn.Module):
                 padding_mask=padding_mask,
                 mask=mask,
                 return_info=return_info,
+                otf_act=otf_act,
+                otf_act_param=otf_act_param,
                 **kwargs
             )

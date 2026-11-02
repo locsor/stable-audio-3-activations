@@ -450,6 +450,28 @@ class Sin(nn.Module):
     def forward(self, x):
         return torch.sin(3.14159265359 * x)
 
+import random
+
+class SinLU(nn.Module):
+    def __init__(self, params):
+        super().__init__()
+
+        self.a = params[0]#random.Random().uniform(0, 1)
+        self.b = params[1]#random.Random().uniform(0, 1)
+
+    def forward(self, x):
+        # a = random.Random().uniform(-1, 1)
+        # b = random.Random().uniform(-1, 1)
+        # print(a, b)
+        return (x + self.a * torch.sin(self.b*x))*torch.sigmoid(x)
+
+def sinlu(x):
+    a = random.Random().uniform(-1, 1)
+    b = random.Random().uniform(-1, 1)
+    # print(a, b)
+    return (x + a * torch.sin(b*x))*torch.sigmoid(x)
+
+
 class FeedForward(nn.Module):
     def __init__(
         self,
@@ -461,7 +483,8 @@ class FeedForward(nn.Module):
         use_conv = False,
         conv_kernel_size = 3,
         zero_init_output = True,
-        sinusoidal = False
+        sinusoidal = False,
+        param = False
     ):
         super().__init__()
         inner_dim = int(dim * mult)
@@ -469,6 +492,8 @@ class FeedForward(nn.Module):
         # Default to SwiGLU
 
         activation = nn.SiLU() if not sinusoidal else Sin()
+        if param:
+            activation = SinLU()
 
         dim_out = dim if dim_out is None else dim_out
 
@@ -490,7 +515,6 @@ class FeedForward(nn.Module):
             if not no_bias:
                 nn.init.zeros_(linear_out.bias)
 
-
         self.ff = nn.Sequential(
             linear_in,
             Rearrange('b d n -> b n d') if use_conv else nn.Identity(),
@@ -500,6 +524,7 @@ class FeedForward(nn.Module):
 
     #@compile
     def forward(self, x, varlen_metadata=None):
+        # print('             FeedForward')
         if varlen_metadata is not None and index_first_axis is not None and pad_input is not None:
             # Pack valid tokens for efficient FFN computation (skip padding tokens)
             # Padding positions become zeros after unpack, which is fine since FFN output
@@ -850,6 +875,7 @@ class ConformerModule(nn.Module):
         x = rearrange(x, 'b d n -> b n d')
         x = self.mid_norm(x)
         x = self.swish(x)
+        # x = self.act_param(x)
         x = rearrange(x, 'b n d -> b d n')
         x = self.pointwise_conv_2(x)
         x = rearrange(x, 'b d n -> b n d')
@@ -873,6 +899,7 @@ class TransformerBlock(nn.Module):
             add_rope = False,
             layer_scale = False,
             norm_type = 'layer_norm',
+            param = False,
             attn_kwargs = {},
             ff_kwargs = {},
             norm_kwargs = {}
@@ -926,7 +953,7 @@ class TransformerBlock(nn.Module):
             self.cross_attn_scale = LayerScale(dim) if layer_scale else nn.Identity()
         
         self.ff_norm = norm_layer(dim, **norm_kwargs)
-        self.ff = FeedForward(dim, zero_init_output=zero_init_branch_outputs, **ff_kwargs)
+        self.ff = FeedForward(dim, zero_init_output=zero_init_branch_outputs, param=param, **ff_kwargs)
         self.ff_scale = LayerScale(dim) if layer_scale else nn.Identity()
 
         self.layer_ix = layer_ix
@@ -1012,6 +1039,7 @@ class TransformerBlock(nn.Module):
         padding_mask = None,
         varlen_metadata = None,
     ):
+        # print('         TransformerBlock')
         if rotary_pos_emb is None and self.add_rope:
             rotary_pos_emb = self.rope.forward_from_seq_len(x.shape[-2])
 
@@ -1092,6 +1120,7 @@ class ContinuousTransformer(nn.Module):
         abs_pos_emb_max_length=10000,
         num_memory_tokens=0,
         sliding_window=None,
+        act_idx = [],
         **kwargs
         ):
 
@@ -1139,8 +1168,15 @@ class ContinuousTransformer(nn.Module):
 
         self.sliding_window = sliding_window
 
+        # act_idx = random.randint(0, depth-1)
         for i in range(depth):
             should_cross_attend = cross_attend and (self.final_cross_attn_ix == -1 or i <= (self.final_cross_attn_ix))
+            
+            param = False
+            if i in act_idx:
+                param = True
+                print('Function bent: ', i)
+
             self.layers.append(
                 TransformerBlock(
                     dim,
@@ -1154,6 +1190,7 @@ class ContinuousTransformer(nn.Module):
                     zero_init_branch_outputs = zero_init_branch_outputs,
                     conformer=conformer,
                     layer_ix=i,
+                    param=param,
                     **kwargs
                 )
             )
@@ -1170,8 +1207,11 @@ class ContinuousTransformer(nn.Module):
         use_checkpointing = True,
         exit_layer_ix = None,
         padding_mask: Optional[torch.Tensor] = None,
+        otf_act = None,
+        otf_act_param = [],
         **kwargs
     ):
+        print('     ContinuousTransformer')
         batch, seq, device = *x.shape[:2], x.device
 
         model_dtype = next(self.parameters()).dtype
@@ -1232,7 +1272,27 @@ class ContinuousTransformer(nn.Module):
                 varlen_metadata = precompute_varlen_metadata(extended_padding_mask)
 
         # Iterate over the transformer layers
+        ct = 0
         for layer_ix, layer in enumerate(self.layers):
+            # print('         ', layer)
+
+            if isinstance(layer, TransformerBlock) and layer_ix in otf_act:
+                # print(layer.ff.ff[0].act)
+                print(otf_act_param)
+                if len(otf_act_param) > 1:
+                    param_a = otf_act_param[ct][0]
+                    param_b = otf_act_param[ct][1]
+                elif len(otf_act_param) == 1:
+                    param_a = otf_act_param[0][0]
+                    param_b = otf_act_param[0][1]
+                else:
+                    param_a = 0.5
+                    param_b = 0.5
+                    
+                layer.ff.ff[0].act = SinLU([param_a, param_b])
+                ct += 1
+            else:
+                layer.ff.ff[0].act = nn.SiLU()
 
             layer_kwargs = {
                 "context": context,
@@ -1243,7 +1303,7 @@ class ContinuousTransformer(nn.Module):
                 "modular_local_cond": modular_local_cond,
                 "self_attention_flash_sliding_window": self.sliding_window,
                 "padding_mask": extended_padding_mask,
-                "varlen_metadata": varlen_metadata
+                "varlen_metadata": varlen_metadata,
             }
 
             if use_checkpointing:

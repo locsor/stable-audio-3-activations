@@ -14,8 +14,11 @@ from stable_audio_3.interface.aeiou import audio_spectrogram_image
 from stable_audio_3.inference.distribution_shift import LogSNRShift, FluxDistributionShift, DistributionShift, IdentityDistributionShift
 from stable_audio_3.models.lora import has_lora, filter_lora_layers
 from stable_audio_3.interface.reprompt import reprompt as _reprompt_fn, get_model as _reprompt_get_model, is_model_cached as _reprompt_is_model_cached
+from stable_audio_3 import StableAudioModel
 
 stable_audio_3_model = None
+model_type_glb = "small-music"
+lora_ckpt_path_glb = ""
 sample_size = 5324800
 sample_rate = 44100
 n_loras = 0
@@ -66,7 +69,7 @@ def generate_cond(
         cfg_scale=6.0,
         steps=250,
         preview_every=None,
-        seed=-1,
+        seed=0,
         sampler_type="dpmpp-3m-sde",
         sigma_max=1000,
         cfg_interval_min=0.0,
@@ -89,6 +92,9 @@ def generate_cond(
         duration_padding_sec=6.0,
         batch_size=1,
         dist_shift=None,
+        otf_act_param_a=[],
+        otf_act_param_b=[],
+        checkboxes=None,
         *lora_args
     ):
 
@@ -96,7 +102,18 @@ def generate_cond(
         torch.cuda.empty_cache()
     gc.collect()
 
-    print(f"Prompt: {prompt}")
+    checkboxes = [int(num) for num in checkboxes]
+
+    if otf_act_param_a != '' and otf_act_param_b != '':
+        otf_act_param_a = otf_act_param_a.split(',')
+        otf_act_param_a = list(map(float, otf_act_param_a))
+
+        otf_act_param_b = otf_act_param_b.split(',')
+        otf_act_param_b = list(map(float, otf_act_param_b))
+
+        otf_act_param = [[x, y] for x, y in zip(otf_act_param_a, otf_act_param_b)]
+    else:
+        otf_act_param = []
 
     global preview_images
     preview_images = []
@@ -197,6 +214,8 @@ def generate_cond(
         "apg_scale": apg_scale,
         "duration_padding_sec": duration_padding_sec,
         "dist_shift": dist_shift,
+        "otf_act": checkboxes,
+        "otf_act_param": otf_act_param,
     }
 
     # If inpainting, send mask args
@@ -207,6 +226,13 @@ def generate_cond(
             "inpaint_mask_start_seconds": mask_maskstart,
             "inpaint_mask_end_seconds": mask_maskend,
         })
+
+    global model_type_glb, lora_ckpt_path_glb
+    model_half = True
+    # stable_audio_3_model = StableAudioModel.from_pretrained(model_type_glb, model_half=model_half)
+    # model = StableAudioModel.from_pretrained(model_type_glb, model_half=model_half)
+    # if lora_ckpt_path_glb:
+    #     model.load_lora(lora_ckpt_path_glb)
 
     audio = stable_audio_3_model.generate(**generate_args)
 
@@ -344,6 +370,36 @@ def create_sampling_ui(stable_audio_3_model, default_prompt=None):
             scale=1
         )
         generate_button = gr.Button("Generate", variant='primary', scale=1)
+    
+    num_of_ff_layers = len(stable_audio_3_model.model.model.model.transformer.layers)
+    checkboxes_text = []
+    for box in range(num_of_ff_layers):
+        checkboxes_text += [str(box)]
+
+    checkboxes = gr.CheckboxGroup(
+        choices=checkboxes_text,
+        label="Select Layers",
+        show_select_all=True
+    )
+
+    # act_checkboxes = []
+    # with gr.Row(scale=3):
+    #     for col in range(5):
+    #         act_checkboxes += [gr.Checkbox(label=str(col))]
+    # with gr.Row(scale=3):
+    #     for col in range(5,10):
+    #         act_checkboxes += [gr.Checkbox(label=str(col))]
+    # with gr.Row(scale=3):
+    #     for col in range(10,15):
+    #         act_checkboxes += [gr.Checkbox(label=str(col))]
+    # with gr.Row(scale=3):
+    #     for col in range(15,20):
+    #         act_checkboxes += [gr.Checkbox(label=str(col))]
+
+    with gr.Row():
+        with gr.Column():
+            otf_act_param_a = gr.Textbox(show_label=False, placeholder="Params A")
+            otf_act_param_b = gr.Textbox(show_label=False, placeholder="Params B")
 
     with gr.Row(equal_height=False):
         with gr.Column():
@@ -384,7 +440,7 @@ def create_sampling_ui(stable_audio_3_model, default_prompt=None):
             with gr.Accordion("Sampler params", open=False):
                 with gr.Row():
                     # Seed
-                    seed_textbox = gr.Number(label="Seed (set to -1 for random seed)", value=-1, precision=0)
+                    seed_textbox = gr.Number(label="Seed (set to -1 for random seed)", value=0, precision=0)
 
                     cfg_interval_min_slider = gr.Slider(minimum=0.0, maximum=1, step=0.01, value=0.0, label="CFG interval min")
                     cfg_interval_max_slider = gr.Slider(minimum=0.0, maximum=1, step=0.01, value=1.0, label="CFG interval max")
@@ -560,6 +616,9 @@ def create_sampling_ui(stable_audio_3_model, default_prompt=None):
                 duration_padding_slider,
                 batch_size_number,
                 dist_shift_state,
+                otf_act_param_a,
+                otf_act_param_b,
+                checkboxes,
             ] + lora_ui_inputs
 
         with gr.Column():
@@ -601,12 +660,14 @@ def create_sampling_ui(stable_audio_3_model, default_prompt=None):
         concurrency_limit=1,
     )
 
-def create_diffusion_cond_ui(model, gradio_title="", default_prompt=None):
-    global sample_size, sample_rate, stable_audio_3_model
+def create_diffusion_cond_ui(model, gradio_title="", default_prompt=None, model_type="small-music", lora_ckpt_path=None):
+    global sample_size, sample_rate, stable_audio_3_model, model_type_glb, lora_ckpt_path_glb
 
     sample_size = model.model_config["sample_size"]
     sample_rate = model.model_config["sample_rate"]
     stable_audio_3_model = model
+    model_type_glb = model_type
+    lora_ckpt_path_glb = lora_ckpt_path
 
 
     js ="""function run_javascript_on_page_load(){

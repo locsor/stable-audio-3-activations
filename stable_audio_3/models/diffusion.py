@@ -193,8 +193,8 @@ class ConditionedDiffusionModelWrapper(nn.Module):
                 "prepend_cond_mask": prepend_cond_mask
             }
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor, cond: tp.Dict[str, tp.Any], **kwargs):
-        return self.model(x, t, **self.get_conditioning_inputs(cond), **kwargs)
+    def forward(self, x: torch.Tensor, t: torch.Tensor, cond: tp.Dict[str, tp.Any], otf_act=None, otf_act_param=[], **kwargs):
+        return self.model(x, t, otf_act=otf_act, otf_act_param=otf_act_param, **self.get_conditioning_inputs(cond), **kwargs)
 
 
 class DiTWrapper(nn.Module):
@@ -229,7 +229,10 @@ class DiTWrapper(nn.Module):
                 batch_cfg: bool = True,
                 rescale_cfg: bool = False,
                 scale_phi: float = 0.0,
+                otf_act=None,
+                otf_act_param=[],
                 **kwargs):
+        print('DiTWrapper')
 
         assert batch_cfg, "batch_cfg must be True for DiTWrapper"
         #assert negative_input_concat_cond is None, "negative_input_concat_cond is not supported for DiTWrapper"
@@ -249,5 +252,7 @@ class DiTWrapper(nn.Module):
             scale_phi=scale_phi,
             global_embed=global_cond,
             local_add_cond=local_add_cond,
+            otf_act=otf_act,
+            otf_act_param=otf_act_param,
             **kwargs)
 

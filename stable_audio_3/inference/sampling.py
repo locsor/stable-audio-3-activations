@@ -144,7 +144,7 @@ def truncated_logistic_normal_rescaled(shape, left_trunc=0.075, right_trunc=1):
 
     return rescaled_samples
 
-def sample_discrete_euler(model, x, sigmas, callback=None, disable_tqdm=False, **extra_args):
+def sample_discrete_euler(model, x, sigmas, callback=None, disable_tqdm=False, otf_act=None, otf_act_param=[], **extra_args):
     """Draws samples from a model given starting noise. Euler method
 
     Args:
@@ -175,7 +175,7 @@ def sample_discrete_euler(model, x, sigmas, callback=None, disable_tqdm=False, *
             dt = t_prev - t_curr
             dt_broadcast = dt
 
-        v = model(x, t_curr_tensor, **extra_args)
+        v = model(x, t_curr_tensor, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
 
         if callback is not None:
             denoised = x - t_curr_tensor[:, None, None] * v
@@ -186,7 +186,7 @@ def sample_discrete_euler(model, x, sigmas, callback=None, disable_tqdm=False, *
     # If we are on the last timestep, output the denoised data
     return x
 
-def sample_rk4(model, x, sigmas, callback=None, disable_tqdm=False, **extra_args):
+def sample_rk4(model, x, sigmas, callback=None, disable_tqdm=False, otf_act=None, otf_act_param=[], **extra_args):
     """Draws samples from a model given starting noise. 4th-order Runge-Kutta
 
     Args:
@@ -205,26 +205,26 @@ def sample_rk4(model, x, sigmas, callback=None, disable_tqdm=False, **extra_args
         t_curr_tensor = t_curr * ts
         dt = t_prev - t_curr  # we solve backwards in our formulation
 
-        k1 = model(x, t_curr_tensor, **extra_args)
+        k1 = model(x, t_curr_tensor, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
 
         if callback is not None:
             denoised = x - t_curr * k1
             callback({'x': x, 't': t_curr, 'sigma': t_curr, 'i': i, 'denoised': denoised})
 
-        k2 = model(x + dt / 2 * k1, (t_curr + dt / 2) * ts, **extra_args)
-        k3 = model(x + dt / 2 * k2, (t_curr + dt / 2) * ts, **extra_args)
+        k2 = model(x + dt / 2 * k1, (t_curr + dt / 2) * ts, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
+        k3 = model(x + dt / 2 * k2, (t_curr + dt / 2) * ts, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
 
         # Clamp t_prev to avoid evaluating model at exactly t=0
         # (models aren't trained at t=0 and may return garbage/NaN)
         t_prev_eval = t_prev.clamp(min=1e-5)
-        k4 = model(x + dt * k3, t_prev_eval * ts, **extra_args)
+        k4 = model(x + dt * k3, t_prev_eval * ts, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
 
         x = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
     # If we are on the last timestep, output the denoised data
     return x
 
-def sample_flow_dpmpp(model, x, sigmas, callback=None, disable_tqdm=False, **extra_args):
+def sample_flow_dpmpp(model, x, sigmas, callback=None, disable_tqdm=False, otf_act=None, otf_act_param=[], **extra_args):
     """Draws samples from a model given starting noise. DPM-Solver++ for RF models
 
     Args:
@@ -264,7 +264,7 @@ def sample_flow_dpmpp(model, x, sigmas, callback=None, disable_tqdm=False, **ext
             t_next_broadcast = t_next
             t_curr_tensor = t_curr.expand(x.shape[0])
 
-        model_output = model(x, t_curr_tensor, **extra_args)
+        model_output = model(x, t_curr_tensor, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
         denoised = x - t_curr_broadcast * model_output
 
         if callback is not None:
@@ -305,7 +305,7 @@ def sample_flow_dpmpp(model, x, sigmas, callback=None, disable_tqdm=False, **ext
         old_denoised = denoised
     return x
 
-def sample_flow_pingpong(model, x, sigmas, callback=None, disable_tqdm=False, **extra_args):
+def sample_flow_pingpong(model, x, sigmas, callback=None, disable_tqdm=False, otf_act=None, otf_act_param=[], **extra_args):
     """Draws samples from a model given starting noise. Ping-pong sampling for distilled models
 
     Args:
@@ -341,7 +341,7 @@ def sample_flow_pingpong(model, x, sigmas, callback=None, disable_tqdm=False, **
         else:
             t_curr_tensor = t_curr * torch.ones((x.shape[0],), dtype=x.dtype, device=x.device)
 
-        denoised = x - t_curr_broadcast * model(x, t_curr_tensor, **extra_args)
+        denoised = x - t_curr_broadcast * model(x, t_curr_tensor, otf_act=otf_act, otf_act_param=otf_act_param, **extra_args)
 
         if callback is not None:
             callback({'x': x, 'i': i, 't': t_curr, 'sigma': t_curr, 'sigma_hat': t_curr, 'denoised': denoised})
@@ -384,6 +384,8 @@ def sample_diffusion(
     disable_tqdm: bool = False,
     decode: bool = True,
     chunked_decode: tp.Optional[bool] = None,
+    otf_act=None,
+    otf_act_param=[],
     **sampler_kwargs
 ) -> torch.Tensor:
     """
@@ -492,13 +494,13 @@ def sample_diffusion(
 
         # Route to sampler
         if sampler_type == "euler":
-            sampled = sample_discrete_euler(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, **common_kwargs)
+            sampled = sample_discrete_euler(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, otf_act=otf_act, otf_act_param=otf_act_param, **common_kwargs)
         elif sampler_type == "rk4":
-            sampled = sample_rk4(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, **common_kwargs)
+            sampled = sample_rk4(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, otf_act=otf_act, otf_act_param=otf_act_param, **common_kwargs)
         elif sampler_type == "dpmpp":
-            sampled = sample_flow_dpmpp(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, **common_kwargs)
+            sampled = sample_flow_dpmpp(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, otf_act=otf_act, otf_act_param=otf_act_param, **common_kwargs)
         elif sampler_type == "pingpong":
-            sampled = sample_flow_pingpong(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, **common_kwargs)
+            sampled = sample_flow_pingpong(model, noise, sigmas=sigmas, callback=callback, disable_tqdm=disable_tqdm, otf_act=otf_act, otf_act_param=otf_act_param, **common_kwargs)
         else:
             raise ValueError(f"Unknown sampler_type for {diffusion_objective}: {sampler_type}")
 

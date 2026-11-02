@@ -74,6 +74,12 @@ def main():
         help="Duration in seconds (default: 120). Pass multiple for per-batch durations",
     )
     parser.add_argument(
+        "--act_idx",
+        type=float,
+        nargs="+",
+        help="Type in activation function layer num",
+    )
+    parser.add_argument(
         "--steps", type=int, default=8, help="Diffusion steps (default: 8)"
     )
     parser.add_argument(
@@ -222,6 +228,10 @@ def main():
             else args.negative_prompt
         )
     duration = args.duration[0] if len(args.duration) == 1 else args.duration
+
+    act_idx = args.act_idx.split('","')
+    act_idx = list(map(int, act_idx))
+    print(act_idx)
 
     # --- chunked_decode flag ---
     chunked_decode = None
