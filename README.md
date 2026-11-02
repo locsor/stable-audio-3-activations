@@ -53,6 +53,12 @@ Base (un-post-trained) checkpoints, the SAME autoencoders, and optimized variant
 
 Stable Audio 3 uses [uv](https://github.com/astral-sh/uv) for fast, lightweight installs. Install only what you need.
 
+To install `uv` use this command:
+
+MacOS: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
 ```bash
 # Base install (Python API only)
 uv sync
